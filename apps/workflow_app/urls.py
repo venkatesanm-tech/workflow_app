@@ -1,21 +1,28 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
+from . import api_views
 
 # Create router for API endpoints
 router = DefaultRouter()
-router.register(r'node-types', views.NodeTypeViewSet, basename='nodetype')
-router.register(r'workflows', views.WorkflowViewSet, basename='workflow')
-router.register(r'executions', views.WorkflowExecutionViewSet, basename='execution')
-router.register(r'variables', views.WorkflowVariableViewSet, basename='variable')
-router.register(r'webhooks', views.WorkflowWebhookViewSet, basename='webhook')
-router.register(r'templates', views.WorkflowTemplateViewSet, basename='template')
+router.register(r'node-types', api_views.NodeTypeViewSet, basename='nodetype')
+router.register(r'workflows', api_views.WorkflowViewSet, basename='workflow')
+router.register(r'executions', api_views.WorkflowExecutionViewSet, basename='execution')
+router.register(r'variables', api_views.WorkflowVariableViewSet, basename='variable')
+router.register(r'webhooks', api_views.WorkflowWebhookViewSet, basename='webhook')
+router.register(r'templates', api_views.WorkflowTemplateViewSet, basename='template')
 
 app_name = 'workflow_app'
 
 urlpatterns = [
     # API endpoints
     path('api/', include(router.urls)),
+    
+    # Additional API endpoints
+    path('api/dashboard/stats/', api_views.dashboard_stats_api, name='dashboard_stats'),
+    path('api/dashboard/recent-activity/', api_views.recent_activity_api, name='recent_activity'),
+    path('api/executions/<uuid:execution_id>/logs/', api_views.execution_logs_api, name='execution_logs'),
+    path('api/workflows/<uuid:workflow_id>/test/', api_views.test_workflow_api, name='test_workflow'),
     
     # Editor views
     path('', views.workflow_list_view, name='workflow_list'),
