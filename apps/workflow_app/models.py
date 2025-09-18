@@ -5,7 +5,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 
-User = 'system.User'
+User = settings.AUTH_USER_MODEL
 
 class NodeType(models.Model):
     """Registry of available node types with their schemas"""

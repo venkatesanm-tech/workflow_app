@@ -144,7 +144,18 @@ class WorkflowEngine:
                 
             except Exception as e:
                 logger.error(f"Node {node_id} ({node_def.get('name', '')}) execution failed: {str(e)}")
-                # Error is already logged by _execute_single_node.
+                
+                # Create failed node execution record
+                self._create_node_execution_record(
+                    execution,
+                    node_def,
+                    node_input if 'node_input' in locals() else {},
+                    {},
+                    order_index,
+                    'failed',
+                    str(e)
+                )
+                
                 # Stop execution if configured to do so.
                 if not node_def.get('config', {}).get('continue_on_error', False):
                     return False
@@ -280,86 +291,6 @@ class WorkflowEngine:
             raise ValueError(f"Workflow contains cycles. Remaining nodes: {remaining_nodes}")
         
         return result
-    
-    def _execute_nodes(
-        self, 
-        execution: WorkflowExecution,
-        graph: Dict,
-        context: Dict,
-        results: Dict
-    ) -> bool:
-        """
-        Execute nodes in the correct order
-        
-        Args:
-            execution: WorkflowExecution instance
-            graph: Execution graph
-            nodes: Node definitions
-            connections: Connection definitions
-            context: Execution context
-            results: Dictionary to store node results
-            
-        Returns:
-            bool: True if all nodes executed successfully
-        """
-        execution_order = graph['execution_order']
-        node_lookup = graph['nodes']
-        incoming = graph['incoming']
-        
-        for order_index, node_id in enumerate(execution_order):
-            node_def = node_lookup[node_id]
-            
-            try:
-                # Prepare input data for this node
-                node_input = self._prepare_node_input(
-                    node_id, 
-                    node_def, 
-                    graph['incoming'], 
-                    results, 
-                    context
-                )
-                
-                # Execute the node
-                node_result = self._execute_single_node(
-                    execution,
-                    node_def,
-                    node_input,
-                    context,
-                    order_index
-                )
-                
-                # Store result for downstream nodes
-                results[node_id] = node_result
-                
-                # Handle conditional branching
-                if 'branch_condition' in node_result:
-                    # Skip certain downstream nodes based on condition result
-                    self._handle_conditional_branching(
-                        node_id, 
-                        node_result, 
-                        graph, 
-                        nodes_to_skip
-                    )
-                
-            except Exception as e:
-                logger.error(f"Node {node_id} execution failed: {str(e)}")
-                
-                # Create failed node execution record
-                self._create_node_execution_record(
-                    execution,
-                    node_def,
-                    {},  # input_data
-                    {},  # output_data
-                    order_index,
-                    'failed',
-                    str(e)
-                )
-                
-                # Stop execution on node failure (unless configured to continue)
-                if not node_def.get('continue_on_error', False):
-                    return False
-        
-        return True
     
     def _prepare_node_input(
         self,

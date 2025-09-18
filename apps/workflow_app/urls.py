@@ -24,6 +24,11 @@ urlpatterns = [
     path('api/executions/<uuid:execution_id>/logs/', api_views.execution_logs_api, name='execution_logs'),
     path('api/workflows/<uuid:workflow_id>/test/', api_views.test_workflow_api, name='test_workflow'),
     
+    # Legacy API endpoints for compatibility
+    path('api/workflow/', views.workflow_api, name='workflow_api'),
+    path('api/workflows/<uuid:workflow_id>/execute/', views.execute_workflow_api, name='execute_workflow_api'),
+    path('api/executions/<uuid:execution_id>/', views.execution_status_api, name='execution_status_api'),
+    
     # Editor views
     path('', views.workflow_list_view, name='workflow_list'),
     path('create/', views.workflow_editor_view, name='workflow_create'),

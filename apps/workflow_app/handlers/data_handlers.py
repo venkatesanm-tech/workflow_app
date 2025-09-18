@@ -153,10 +153,10 @@ class QueryBuilderHandler(BaseNodeHandler):
     def execute(self, config: Dict[str, Any], input_data: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
         try:
             # Parse configuration
-            tables = self._parse_json_field(config.get('tables', '[]'))
-            columns = self._parse_json_field(config.get('columns', '[]'))
-            joins = self._parse_json_field(config.get('joins', '[]'))
-            where_conditions = self._parse_json_field(config.get('where_conditions', '{}'))
+            tables = self._parse_json_field(config.get('tables', []))
+            columns = self._parse_json_field(config.get('columns', []))
+            joins = self._parse_json_field(config.get('joins', []))
+            where_conditions = self._parse_json_field(config.get('where_conditions', {}))
             limit = config.get('limit', 100)
             
             if not tables:
@@ -241,10 +241,10 @@ class QueryBuilderHandler(BaseNodeHandler):
         """Parse JSON field value"""
         if isinstance(value, str):
             try:
-                return json.loads(value) if value.strip() else []
+                return json.loads(value) if value.strip() else ([] if '[' in value or value == '' else {})
             except json.JSONDecodeError:
-                return []
-        return value or []
+                return [] if isinstance(value, str) and ('[' in value or value == '') else {}
+        return value if value is not None else []
     
     def _build_where_clause(self, conditions):
         """Build WHERE clause from conditions object"""

@@ -859,7 +859,7 @@ def workflow_api(request):
 def execute_workflow_api(request, workflow_id):
     """Execute a workflow via API"""
     try:
-        workflow = Workflow.objects.get(id=workflow_id)
+        workflow = get_object_or_404(Workflow, id=workflow_id)
         
         if workflow.status != 'active':
             return JsonResponse(
@@ -870,10 +870,14 @@ def execute_workflow_api(request, workflow_id):
         data = json.loads(request.body) if request.body else {}
         input_data = data.get('input_data', {})
         
+        # Get user from request
+        user = request.user if request.user.is_authenticated else None
+        
         # Create execution
         execution = WorkflowExecution.objects.create(
             workflow=workflow,
             triggered_by='api',
+            triggered_by_user=user,
             input_data=input_data,
             execution_context={'api_trigger': True}
         )
@@ -887,8 +891,6 @@ def execute_workflow_api(request, workflow_id):
             'message': 'Workflow execution started'
         })
         
-    except Workflow.DoesNotExist:
-        return JsonResponse({'error': 'Workflow not found'}, status=404)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -897,19 +899,37 @@ def execute_workflow_api(request, workflow_id):
 def execution_status_api(request, execution_id):
     """Get execution status and results"""
     try:
-        execution = WorkflowExecution.objects.get(id=execution_id)
+        execution = get_object_or_404(
+            WorkflowExecution.objects.select_related('workflow'),
+            id=execution_id
+        )
+        
+        # Get node executions
+        node_executions = []
+        for ne in execution.node_executions.all().order_by('execution_order'):
+            node_executions.append({
+                'node_id': ne.node_id,
+                'node_name': ne.node_name,
+                'node_type': ne.node_type,
+                'status': ne.status,
+                'duration_ms': ne.duration_ms,
+                'input_data': ne.input_data,
+                'output_data': ne.output_data,
+                'error_message': ne.error_message
+            })
         
         return JsonResponse({
             'id': str(execution.id),
+            'workflow_id': str(execution.workflow.id),
+            'workflow_name': execution.workflow.name,
             'status': execution.status,
             'started_at': execution.started_at.isoformat(),
             'finished_at': execution.finished_at.isoformat() if execution.finished_at else None,
             'duration_seconds': execution.duration_seconds,
             'output_data': execution.output_data,
-            'error_message': execution.error_message
+            'error_message': execution.error_message,
+            'node_executions': node_executions
         })
         
-    except WorkflowExecution.DoesNotExist:
-        return JsonResponse({'error': 'Execution not found'}, status=404)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)

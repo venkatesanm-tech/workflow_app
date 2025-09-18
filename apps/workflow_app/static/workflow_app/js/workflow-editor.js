@@ -549,6 +549,12 @@ class WorkflowEditor {
 
         if (property === 'name') {
             node.name = value
+        } else if (property === 'description') {
+            node.description = value
+        } else if (property === 'continue_on_error') {
+            node.continue_on_error = value
+        } else if (property === 'timeout') {
+            node.timeout = value
         } else {
             if (!node.config) node.config = {}
             node.config[property] = value
@@ -560,17 +566,91 @@ class WorkflowEditor {
 
     startConnection(e, nodeId, handleType) {
         e.preventDefault()
+        e.stopPropagation()
         
         if (handleType === 'output') {
             this.isConnecting = true
             this.connectionStart = { nodeId, handleType }
             
-            // Create temporary connection line
-            this.createTempConnection(e)
+            // Add visual feedback
+            const sourceNode = document.querySelector(`[data-node-id="${nodeId}"]`)
+            const sourceHandle = sourceNode.querySelector('.node-handle.output')
+            sourceHandle.classList.add('connecting')
+            
+            // Set up mouse move listener for temporary connection
+            const canvas = document.getElementById('workflow-canvas')
+            const canvasRect = canvas.getBoundingClientRect()
+            
+            const updateTempConnection = (e) => {
+                this.updateTempConnection(e, canvasRect)
+            }
+            
+            const finishConnection = (e) => {
+                document.removeEventListener('mousemove', updateTempConnection)
+                document.removeEventListener('mouseup', finishConnection)
+                sourceHandle.classList.remove('connecting')
+                this.finishConnection(e)
+            }
+            
+            document.addEventListener('mousemove', updateTempConnection)
+            document.addEventListener('mouseup', finishConnection)
+            
         } else if (handleType === 'input' && this.connectionStart) {
             // Complete connection
             this.completeConnection(nodeId)
         }
+    }
+    
+    updateTempConnection(e, canvasRect) {
+        if (!this.connectionStart) return
+        
+        let tempLine = this.connectionsLayer.querySelector('.temp-connection')
+        if (!tempLine) {
+            tempLine = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+            tempLine.setAttribute('class', 'temp-connection')
+            tempLine.setAttribute('stroke', '#6b7280')
+            tempLine.setAttribute('stroke-width', '2')
+            tempLine.setAttribute('stroke-dasharray', '5,5')
+            tempLine.setAttribute('fill', 'none')
+            this.connectionsLayer.appendChild(tempLine)
+        }
+        
+        const sourceNode = document.querySelector(`[data-node-id="${this.connectionStart.nodeId}"]`)
+        const sourceHandle = sourceNode.querySelector('.node-handle.output')
+        const sourceRect = sourceHandle.getBoundingClientRect()
+        
+        const startX = sourceRect.left + sourceRect.width / 2 - canvasRect.left
+        const startY = sourceRect.top + sourceRect.height / 2 - canvasRect.top
+        const endX = e.clientX - canvasRect.left
+        const endY = e.clientY - canvasRect.top
+        
+        const dx = endX - startX
+        const controlOffset = Math.max(50, Math.abs(dx) * 0.5)
+        
+        const path = `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`
+        tempLine.setAttribute('d', path)
+    }
+    
+    finishConnection(e) {
+        // Remove temporary connection
+        const tempLine = this.connectionsLayer.querySelector('.temp-connection')
+        if (tempLine) {
+            tempLine.remove()
+        }
+        
+        // Check if we're over an input handle
+        const target = document.elementFromPoint(e.clientX, e.clientY)
+        if (target && target.classList.contains('node-handle') && target.classList.contains('input')) {
+            const targetNode = target.closest('.workflow-node')
+            const targetNodeId = targetNode.getAttribute('data-node-id')
+            
+            if (this.connectionStart && targetNodeId !== this.connectionStart.nodeId) {
+                this.completeConnection(targetNodeId)
+            }
+        }
+        
+        this.isConnecting = false
+        this.connectionStart = null
     }
 
     createTempConnection(e) {
@@ -641,6 +721,8 @@ class WorkflowEditor {
         const sourceHandle = sourceNode.querySelector('.node-handle.output')
         const targetHandle = targetNode.querySelector('.node-handle.input')
         
+        if (!sourceHandle || !targetHandle) return
+        
         const sourceRect = sourceHandle.getBoundingClientRect()
         const targetRect = targetHandle.getBoundingClientRect()
         const canvasRect = document.getElementById('workflow-canvas').getBoundingClientRect()
@@ -660,6 +742,8 @@ class WorkflowEditor {
             connectionElement.setAttribute('stroke-width', '2')
             connectionElement.setAttribute('fill', 'none')
             connectionElement.setAttribute('marker-end', 'url(#arrowhead)')
+            connectionElement.style.pointerEvents = 'stroke'
+            connectionElement.style.cursor = 'pointer'
             this.connectionsLayer.appendChild(connectionElement)
             
             connectionElement.addEventListener('click', (e) => {
@@ -669,12 +753,11 @@ class WorkflowEditor {
         }
 
         // Create curved path
-        const controlX1 = startX + (endX - startX) * 0.5
-        const controlY1 = startY
-        const controlX2 = startX + (endX - startX) * 0.5
-        const controlY2 = endY
+        const dx = endX - startX
+        const dy = endY - startY
+        const controlOffset = Math.max(50, Math.abs(dx) * 0.5)
         
-        const path = `M ${startX} ${startY} C ${controlX1} ${controlY1}, ${controlX2} ${controlY2}, ${endX} ${endY}`
+        const path = `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`
         connectionElement.setAttribute('d', path)
     }
 
@@ -1009,11 +1092,12 @@ class WorkflowEditor {
                 this.markClean()
                 this.showNotification('Workflow saved successfully', 'success')
             } else {
-                throw new Error('Failed to save workflow')
+                const errorData = await response.json()
+                throw new Error(errorData.error || 'Failed to save workflow')
             }
         } catch (error) {
             console.error('Save error:', error)
-            this.showNotification('Failed to save workflow', 'error')
+            this.showNotification(error.message || 'Failed to save workflow', 'error')
         } finally {
             this.isLoading = false
             this.hideLoading()
@@ -1022,38 +1106,87 @@ class WorkflowEditor {
 
     async testWorkflow() {
         if (!this.options.workflowId) {
-            this.showNotification('Please save the workflow first', 'warning')
-            return
+            // Save workflow first
+            await this.saveWorkflow()
+            if (!this.options.workflowId) {
+                this.showNotification('Failed to save workflow before testing', 'error')
+                return
+            }
         }
 
         try {
             this.showLoading('Testing workflow...')
 
-            const response = await fetch(`${this.options.apiBaseUrl}${this.options.workflowId}/execute/`, {
+            const response = await fetch(`/workflow/api/workflows/${this.options.workflowId}/test/`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': this.options.csrfToken,
                 },
-                body: JSON.stringify({ sync: false, test_mode: true }),
+                body: JSON.stringify({ 
+                    input_data: {},
+                    test_mode: true 
+                }),
             })
 
             if (response.ok) {
                 const result = await response.json()
-                this.showNotification('Workflow test started', 'success')
+                this.showNotification(`Workflow test ${result.success ? 'completed successfully' : 'failed'}`, result.success ? 'success' : 'error')
                 this.switchTab('logs')
-                this.pollExecutionStatus(result.execution_id)
+                
+                // Update node statuses
+                if (result.node_executions) {
+                    this.updateNodeStatuses(result.node_executions)
+                }
+                
+                // Display logs
+                this.displayTestResults(result)
             } else {
-                throw new Error('Failed to start workflow test')
+                const errorData = await response.json()
+                throw new Error(errorData.error || 'Failed to start workflow test')
             }
         } catch (error) {
             console.error('Test error:', error)
-            this.showNotification('Failed to test workflow', 'error')
+            this.showNotification(error.message || 'Failed to test workflow', 'error')
         } finally {
             this.hideLoading()
         }
     }
+    
+    displayTestResults(result) {
+        const logsContainer = document.getElementById('execution-logs')
+        if (!logsContainer) return
 
+        let logsHtml = `
+            <div class="test-results">
+                <div class="test-summary">
+                    <strong>Test Results:</strong> ${result.success ? 'SUCCESS' : 'FAILED'}
+                    ${result.duration_seconds ? ` (${result.duration_seconds.toFixed(2)}s)` : ''}
+                </div>
+            </div>
+        `
+
+        if (result.node_executions && result.node_executions.length > 0) {
+            result.node_executions.forEach(nodeExec => {
+                const timestamp = new Date().toLocaleTimeString()
+                const levelClass = nodeExec.status === 'failed' ? 'log-error' : 'log-info'
+                const message = nodeExec.error_message || `Node executed successfully`
+
+                logsHtml += `
+                    <div class="log-entry ${levelClass}">
+                        <span class="log-timestamp">[${timestamp}]</span>
+                        <span class="log-level">${nodeExec.status.toUpperCase()}</span>
+                        <span class="log-node">${nodeExec.node_name}:</span>
+                        <span class="log-message">${message}</span>
+                        ${nodeExec.duration_ms ? `<span class="log-duration">(${nodeExec.duration_ms}ms)</span>` : ''}
+                    </div>
+                `
+            })
+        }
+
+        logsContainer.innerHTML = logsHtml
+        logsContainer.scrollTop = logsContainer.scrollHeight
+    }
     async pollExecutionStatus(executionId) {
         const maxPolls = 60
         let pollCount = 0
@@ -1163,7 +1296,9 @@ class WorkflowEditor {
                 type: node.type,
                 name: node.name,
                 position: node.position,
-                config: node.config || {}
+                config: node.config || {},
+                continue_on_error: node.continue_on_error || false,
+                timeout: node.timeout || 30
             })
         })
 
@@ -1178,6 +1313,8 @@ class WorkflowEditor {
 
         return {
             name: nameInput ? nameInput.value : 'Untitled Workflow',
+            description: document.getElementById('workflow-description')?.value || '',
+            status: 'draft',
             definition: { nodes, connections }
         }
     }
